@@ -10,7 +10,8 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
 # git: sentence-stream is installed from a pinned commit
-RUN apt-get update && apt-get install -y --no-install-recommends git \
+# sox: qwen-tts imports the sox wrapper, which warns at startup when the binary is missing
+RUN apt-get update && apt-get install -y --no-install-recommends git sox \
     && rm -rf /var/lib/apt/lists/*
 
 COPY pyproject.toml README.md /tmp/src/
