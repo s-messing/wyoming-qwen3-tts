@@ -16,22 +16,23 @@ from wyoming.tts import (
     SynthesizeStopped,
 )
 
-from .engine import CHANNELS, SAMPLE_RATE, SAMPLE_WIDTH, XTTSEngine
+from .audio import CHANNELS, SAMPLE_RATE, SAMPLE_WIDTH, language_code
+from .engine import Qwen3Engine
+from .scheduler import Request
 from .segmenter import BufferedSegmenter
 from .streaming import StreamingHandler
-from .voice import resolve_language, resolve_voice
+from .voice import resolve_voice
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class XTTSEventHandler(AsyncEventHandler):
+class Qwen3EventHandler(AsyncEventHandler):
     def __init__(
         self,
         wyoming_info: Info,
-        engine: XTTSEngine,
+        engine: Qwen3Engine,
         voices_path: Path,
-        language_fallback: str | None,
-        no_detect_language: bool,
+        default_language: str,
         min_segment_chars: int,
         *args: Any,
         **kwargs: Any,
@@ -40,15 +41,13 @@ class XTTSEventHandler(AsyncEventHandler):
         self.wyoming_info = wyoming_info
         self.engine = engine
         self.voices_path = voices_path
-        self.language_fallback = language_fallback
-        self.no_detect_language = no_detect_language
+        self.default_language = default_language
         self.min_segment_chars = min_segment_chars
         self._streaming = StreamingHandler(
             self,
             engine,
             voices_path,
-            language_fallback,
-            no_detect_language,
+            default_language,
             min_segment_chars,
         )
 
@@ -104,10 +103,11 @@ class XTTSEventHandler(AsyncEventHandler):
             return
 
         voice_name = synthesize.voice.name if synthesize.voice else None
-        voice_path = resolve_voice(self.voices_path, voice_name)
-        language = resolve_language(synthesize.voice, text, self.language_fallback, self.no_detect_language)
+        voice = resolve_voice(self.voices_path, voice_name)
+        language = language_code(synthesize.voice.language if synthesize.voice else None, self.default_language)
+        request = Request(name=f"synthesize:{voice.name}")
 
-        _LOGGER.debug("Synthesizing: %r (voice=%s, lang=%s)", text[:50], voice_path.stem, language)
+        _LOGGER.debug("Synthesizing: %r (voice=%s, lang=%s)", text[:50], voice.name, language)
 
         await self.write_event(AudioStart(rate=SAMPLE_RATE, width=SAMPLE_WIDTH, channels=CHANNELS).event())
 
@@ -115,13 +115,13 @@ class XTTSEventHandler(AsyncEventHandler):
         segmenter = BufferedSegmenter(min_chars=self.min_segment_chars)
 
         for segment in segmenter.add_chunk(text):
-            result = await self.engine.stream_to_handler(self, segment, voice_path, language)
+            result = await self.engine.stream_to_handler(self, request, segment, voice, language)
             if first_audio is None:
                 first_audio = result
 
         remaining = segmenter.finish()
         if remaining:
-            result = await self.engine.stream_to_handler(self, remaining, voice_path, language)
+            result = await self.engine.stream_to_handler(self, request, remaining, voice, language)
             if first_audio is None:
                 first_audio = result
 
@@ -131,7 +131,7 @@ class XTTSEventHandler(AsyncEventHandler):
         first_audio_elapsed = first_audio if first_audio is not None else elapsed
         _LOGGER.info(
             "Synthesis: stream_in=false, stream_out=true, voice=%s, lang=%s, %d chars, %.2fs, first_audio_chunk=%.2fs",
-            voice_path.stem,
+            voice.name,
             language,
             len(text),
             elapsed,

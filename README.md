@@ -1,118 +1,125 @@
-# wyoming-xtts
+# wyoming-qwen3-tts
 
-A Wyoming protocol server for XTTS v2 text-to-speech, built for Home Assistant.
+A Wyoming protocol server for [Qwen3-TTS](https://github.com/QwenLM/Qwen3-TTS) text-to-speech, built for Home Assistant and tuned for German.
+
+Based on [lmoe/wyoming-xtts](https://github.com/lmoe/wyoming-xtts). The Wyoming handling, streaming and Zeroconf code come from there; the XTTS engine was replaced by Qwen3-TTS.
 
 ## Why
 
-I wanted to use XTTS with Home Assistant but could not find a proper solution. Spent a day with various tools and bridges, but nothing really fit what I needed. So I decided I just wrote my own.
-
-It simply does XTTS over the Wyoming protocol. No web interface, no API bridges, no configuration files. You put your voice samples in a folder and it works.
+Piper's German voices sound robotic, and XTTS v2 is old and has a non-commercial licence. Qwen3-TTS (Apache-2.0, January 2026) speaks good German and, through [faster-qwen3-tts](https://github.com/andimarafioti/faster-qwen3-tts), streams its first audio in about 0.2 s on a consumer GPU.
 
 ## Features
 
-- Wyoming protocol native, follows wyoming-piper reference (Zeroconf discovery included)
-- Bidirectional streaming support (text streams in from LLM, audio streams out)
-- DeepSpeed (faster inference, trades VRAM for speed)
-
-With bidirectional streaming and DeepSpeed you should expect a good, snappy performance. DeepSpeed halved the response time on my 1080. 
+- Native Wyoming protocol with Zeroconf discovery, following wyoming-piper.
+- Bidirectional streaming: text streams in from the LLM, audio streams out sentence by sentence.
+- **Voices from a description.** You describe a voice in plain words, pick the best of a few candidates, and the server clones that fixed clip on every request so the voice stays consistent.
+- **German text normalization.** Numbers, decimals, dates, times, units, currency and abbreviations are spelled out before synthesis ("21,5 °C" → "einundzwanzig Komma fünf Grad"). Qwen3-TTS garbles or derails on raw symbols and digits.
+- **Markdown and emoji are stripped.** Home Assistant passes raw LLM output to TTS.
+- **German-aware sentence splitting.** "z. B." and "am 3. Oktober" stay in one piece.
+- **Fair scheduling for several rooms.** Requests take turns sentence by sentence on the GPU, so a second room doesn't wait for the first room's whole answer.
+- Generation is capped by text length, so a runaway generation stops early.
+- A fixed seed makes the same sentence always sound the same.
 
 ## Quick Start
 
 ```bash
-
-mkdir -p /path/to/your/assets/voices
+mkdir -p /path/to/qwen3_data
 
 docker run -d \
   --gpus all \
   -p 10200:10200 \
-  --name wyoming-xtts \
-  -v /path/to/your/assets:/data \
-  lmo3/wyoming-xtts
+  --name wyoming-qwen3-tts \
+  -v /path/to/qwen3_data:/data \
+  ghcr.io/s-messing/wyoming-qwen3-tts
 ```
 
-**Note**: use `lmo3/wyoming-xtts:cu128` when using an Nvidia 5xxx card. 
+The models (about 4.5 GB for 1.7B-Base) are downloaded to `/data/hf` on first start.
 
-Then add to Home Assistant:
+Then add the server to Home Assistant:
 
-1) Settings -> Devices & services -> Add integration -> Wyoming Protocol -> Enter IP and Port (Default 10200) / Or, use the auto detected wyoming-xtts node if HA received the Zeroconf advertisement. 
-2) Settings -> Voice assistants -> [Add or Select existing Assistant] -> Text-to-speech -> wyoming-xtts
-3) Configure voice, language (Currently HA doesn't send the selected language to any wyoming-tts server, so auto detect will be used until this is fixed.)
-4) ???
-5) Profit
+1. Settings → Devices & services → Add integration → Wyoming Protocol → enter IP and port (default 10200), or use the auto-detected `wyoming-qwen3-tts` entry.
+2. Settings → Voice assistants → your assistant → Text-to-speech → wyoming-qwen3-tts.
+3. Pick your voice.
+
+## Creating a voice
+
+A voice is a reference clip `voices/<name>.wav` plus its exact transcript `voices/<name>.txt`. The easiest way to create one is from a description:
+
+```bash
+# 1. Generate three candidates speaking a German reference sentence
+docker run --rm --gpus all -v /path/to/qwen3_data:/data ghcr.io/s-messing/wyoming-qwen3-tts \
+  design --name max \
+  --description "A calm male voice in his forties, native German speaker with standard High German pronunciation, clear, friendly and slightly deep."
+
+# 2. Listen to /path/to/qwen3_data/voices/_candidates/max_{1,2,3}.wav, then keep the best one
+docker run --rm -v /path/to/qwen3_data:/data ghcr.io/s-messing/wyoming-qwen3-tts pick --name max --candidate 2
+
+# 3. Restart the server to load the new voice
+docker restart wyoming-qwen3-tts
+```
+
+- `design` loads the 1.7B VoiceDesign model (about 4.3 GB VRAM) only for this command. Run it while the server is stopped if VRAM is tight.
+- Descriptions can be written in English or German.
+- `--text` changes the reference sentence. `--candidates` changes how many candidates are generated.
+
+You can also use a recording of a real voice. Put `name.wav` (3–10 s of clean speech) and `name.txt` (exactly what is said) into `voices/`.
+
+On first start the server turns each voice into a clone prompt and caches it as `voices/<name>.<model>.pt`. Delete that file to rebuild it.
 
 ## Assets
 
-Mount a folder or volume to `/data`. The server handles the rest:
+Mount a folder or volume to `/data`:
 
 ```
 /data/
-├── models/    # XTTS model files (~2GB, auto-downloaded if missing)
-├── voices/    # Your voice samples (WAV files, 6-30 seconds each)
-└── cache/     # Torch compilation cache
+├── voices/   # <name>.wav + <name>.txt per voice, plus cached <name>.<model>.pt prompts
+└── hf/       # Hugging Face model cache
 ```
-
-Voice files are picked up by filename. Put `sarah.wav` in the voices folder, select "sarah" in Home Assistant.
-
-Voice samples should be WAV files, mono, 22050 Hz, 16-bit PCM. XTTS resamples other formats internally but this avoids unnecessary conversion. Aim for 6-30 seconds of clear speech without background noise.
-
-When DeepSpeed is enabled, it compiles a few libraries on first start. These go into the cache folder, so you don't have to compile them again after redeploying the docker container.
 
 ## Configuration
 
-No config files. Environment variables only.
+Environment variables only, no config files.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `XTTS_URI` | `tcp://0.0.0.0:10200` | Server address |
-| `XTTS_ASSETS` | (local)`./assets`, (docker)`/data` | Assets directory |
-| `XTTS_ZEROCONF` | `wyoming-xtts` | Zeroconf service name (set empty to disable) |
-| `XTTS_DEEPSPEED` | `false` | Enable DeepSpeed (faster, uses more VRAM) |
-| `XTTS_LANGUAGE_FALLBACK` | `en` | Fallback when HA doesn't send language and detection fails |
-| `XTTS_LANGUAGE_NO_DETECT` | `false` | Disable language auto-detection, always use fallback |
-| `XTTS_LOG_LEVEL` | `INFO` | Log level (DEBUG, INFO, WARNING, ERROR) |
-| `XTTS_NO_DOWNLOAD_MODEL` | `false` | Disable XTTS model auto-download |
+| `QWEN3_URI` | `tcp://0.0.0.0:10200` | Server address |
+| `QWEN3_ASSETS` | (local) `./assets`, (docker) `/data` | Assets directory |
+| `QWEN3_ZEROCONF` | `wyoming-qwen3-tts` | Zeroconf service name (set empty to disable) |
+| `QWEN3_MODEL` | `Qwen/Qwen3-TTS-12Hz-1.7B-Base` | Base model. `Qwen/Qwen3-TTS-12Hz-0.6B-Base` saves about 1 GB VRAM at slightly lower quality |
+| `QWEN3_DESIGN_MODEL` | `Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign` | Model used by `design` |
+| `QWEN3_OFFLINE` | `false` | Use only the local model cache, never download |
+| `QWEN3_LANGUAGE` | `de` | Language when Home Assistant does not send one: de, en, fr, es, it, pt, ru, zh, ja, ko |
+| `QWEN3_LOG_LEVEL` | `INFO` | Log level (DEBUG, INFO, WARNING, ERROR) |
 
-### Synthesis Parameters
-
-Note: All XTTS defaults are taken from the Xtts library config defaults.
+### Synthesis parameters
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `XTTS_TEMPERATURE` | `0.85` | Sampling temperature (higher = more creative, less stable) |
-| `XTTS_SPEED` | `1.0` | Speech speed multiplier |
-| `XTTS_TOP_K` | `50` | Top-k sampling (fewer = faster, less diverse) |
-| `XTTS_TOP_P` | `0.85` | Nucleus sampling threshold |
-| `XTTS_REPETITION_PENALTY` | `2.0` | Repetition penalty |
-| `XTTS_STREAM_CHUNK_SIZE` | `20` | Tokens per audio chunk (lower = faster first audio, may stutter) |
-| `XTTS_MIN_SEGMENT_CHARS` | `20` | Minimum characters before synthesizing (prevents short segment hallucinations) |
-| `XTTS_SEED` | `42` | Fixed seed for reproducible synthesis, set `XTTS_SEED=""` for a random seed and random synthesis |
+| `QWEN3_TEMPERATURE` | `0.5` | Sampling temperature. Lower is more uniform and slightly more "assistant-like"; the model default 0.9 is more expressive |
+| `QWEN3_TOP_K` | `50` | Top-k sampling |
+| `QWEN3_TOP_P` | `1.0` | Nucleus sampling threshold |
+| `QWEN3_REPETITION_PENALTY` | `1.05` | Repetition penalty |
+| `QWEN3_CHUNK_SIZE` | `4` | Codec steps per streamed audio chunk (12.5 steps = 1 s). Lower means faster first audio |
+| `QWEN3_MIN_SEGMENT_CHARS` | `20` | Minimum characters before a segment is synthesized |
+| `QWEN3_SEED` | `42` | The same text always produces the same audio. Set `QWEN3_SEED=""` for random variation |
 
-Or use CLI arguments (`--deepspeed`, `--fallback-language de`, `--top-k 30`, etc.).
+CLI arguments work too (`--model`, `--temperature 0.7`, …).
 
-### Why is there a seed?
+## Language
 
-XTTS uses random sampling and sometimes doesn't stop when it should. A 2 second sentence can become 10 seconds of gibberish. This is a [known issue](https://github.com/coqui-ai/TTS/discussions/4146) with no real fix.
+Home Assistant currently does not send the selected language to Wyoming TTS servers. This server therefore uses `QWEN3_LANGUAGE` (default German) unless a request carries a language. German text normalization only runs for German.
 
-A fixed seed makes output deterministic. Same text sounds the same every time. This doesn't prevent hallucinations, but if seed 42 works for your voice samples, it will keep working. If you get hallucinations, try a different seed value. Set `XTTS_SEED=""` for random behavior, but expect inconsistent results.
-
-## Supported Languages
-
-en, es, fr, de, it, pt, pl, tr, ru, nl, cs, ar, zh-cn, hu, ko, ja, hi
-
-Language is meant to be sent by Home Assistant based on your voice assistant config. Currently Home Assistant does not do this. Hence, this server auto-detects from text for now. If that fails, it uses `XTTS_LANGUAGE_FALLBACK` (default: `en`). Set `XTTS_LANGUAGE_NO_DETECT=true` to skip detection entirely.
+If you want your own replacement rules on top, for example for names or Denglisch, [TTS Proxy](https://github.com/Thyraz/tts-proxy) can sit in Home Assistant between the assistant and this server.
 
 ## Requirements
 
-- NVIDIA GPU (Pascal/GTX 10xx or newer)
-- Docker with nvidia-container-toolkit
-- ~2GB disk space for the model
+- An NVIDIA GPU with bf16 support. The image is built for CUDA 12.8 (Volta through Blackwell / RTX 50xx).
+- Docker with nvidia-container-toolkit, or podman with CDI.
+- VRAM: about 4.3 GB for 1.7B-Base and about 3.3 GB for 0.6B-Base, measured on an RTX 5060 Ti.
+- About 5 GB of disk space per model.
 
-On purpose this service uses PyTorch cu126 which still includes sm_60 support. 
-
-Newer PyTorch builds dropped this, so Pascal cards (GTX 1080 etc.) would not work. 
-This build should support everything from GTX 10xx series upwards. 
-
+Measured on an RTX 5060 Ti 16 GB (1.7B, German): about 0.2 s to first audio, and about 2.2× faster than real time.
 
 ## License
 
-MIT
+MIT. Qwen3-TTS models are Apache-2.0. `de_tables.py` adapts tables from [Godelaune/Kokoro-82M-ONNX-German-Martin](https://huggingface.co/Godelaune/Kokoro-82M-ONNX-German-Martin) (Apache-2.0).
