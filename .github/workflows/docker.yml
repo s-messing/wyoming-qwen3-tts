@@ -11,24 +11,14 @@ on:
         required: false
 
 env:
-  IMAGE_NAME: lmo3/wyoming-xtts
+  IMAGE_NAME: ghcr.io/${{ github.repository }}
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        include:
-          - cuda_variant: cu126
-            cuda_image: nvidia/cuda:12.6.3-devel-ubuntu22.04
-            torch_index: https://download.pytorch.org/whl/cu126
-            torch_arch: "6.0;6.1;7.0;7.5;8.0;8.6;8.9;9.0"
-            is_default: true
-          - cuda_variant: cu128
-            cuda_image: nvidia/cuda:12.8.1-devel-ubuntu22.04
-            torch_index: https://download.pytorch.org/whl/cu128
-            torch_arch: "7.0;7.5;8.0;8.6;8.9;9.0;12.0"
-            is_default: false
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Free up disk space
         run: |
@@ -39,45 +29,46 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Lint, type check and test
+        run: |
+          pip install ruff mypy pytest pytest-asyncio numpy emoji num2words "pydantic-settings>=2.0" "wyoming[zeroconf]>=1.10.2" \
+            "sentence-stream @ git+https://github.com/OHF-Voice/sentence-stream@ba166de913bc71e43f1b31fa19da1e606cc2c744"
+          ruff check .
+          ruff format --check .
+          mypy wyoming_qwen3_tts/
+          PYTHONPATH=. pytest -q
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to Docker Hub
+      - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Generate tags and version
         id: meta
         run: |
-          VARIANT="${{ matrix.cuda_variant }}"
-          IS_DEFAULT="${{ matrix.is_default }}"
-
+          IMAGE="${IMAGE_NAME,,}"
           if [[ "${{ github.ref_type }}" == "tag" ]]; then
             VERSION="${{ github.ref_name }}"
             VERSION="${VERSION#v}"  # Strip 'v' prefix
-            TAGS="${{ env.IMAGE_NAME }}:${VERSION}-${VARIANT}"
-            if [[ "$IS_DEFAULT" == "true" ]]; then
-              TAGS="${TAGS},${{ env.IMAGE_NAME }}:${VERSION},${{ env.IMAGE_NAME }}:latest"
-            fi
-            echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+            echo "tags=${IMAGE}:${VERSION},${IMAGE}:latest" >> $GITHUB_OUTPUT
             echo "version=${VERSION}" >> $GITHUB_OUTPUT
           elif [[ -n "${{ github.event.inputs.tag }}" ]]; then
             TAG="${{ github.event.inputs.tag }}"
-            TAGS="${{ env.IMAGE_NAME }}:${TAG}-${VARIANT}"
-            if [[ "$IS_DEFAULT" == "true" ]]; then
-              TAGS="${TAGS},${{ env.IMAGE_NAME }}:${TAG}"
-            fi
-            echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+            echo "tags=${IMAGE}:${TAG}" >> $GITHUB_OUTPUT
             echo "version=${TAG}" >> $GITHUB_OUTPUT
           else
             SHA="${{ github.sha }}"
-            TAGS="${{ env.IMAGE_NAME }}:${SHA::7}-${VARIANT}"
-            if [[ "$IS_DEFAULT" == "true" ]]; then
-              TAGS="${TAGS},${{ env.IMAGE_NAME }}:${SHA::7}"
-            fi
-            echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+            echo "tags=${IMAGE}:${SHA::7}" >> $GITHUB_OUTPUT
             echo "version=0.0.0.dev0+${SHA::7}" >> $GITHUB_OUTPUT
           fi
 
@@ -89,6 +80,3 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           build-args: |
             VERSION=${{ steps.meta.outputs.version }}
-            CUDA_IMAGE=${{ matrix.cuda_image }}
-            TORCH_INDEX_URL=${{ matrix.torch_index }}
-            TORCH_CUDA_ARCH_LIST=${{ matrix.torch_arch }}

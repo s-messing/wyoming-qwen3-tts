@@ -1,0 +1,156 @@
+"""Lookup tables for German text normalization.
+
+The abbreviation list and the unit list (pattern, singular, plural, gender) are adapted from
+german_text_rules.py in https://huggingface.co/Godelaune/Kokoro-82M-ONNX-German-Martin
+(Apache License 2.0). Modifications: segmentation-only entries removed, patterns made
+whitespace-tolerant, "circa" spelling, and units/symbols added for smart-home output.
+"""
+
+# (regex, replacement); applied in order, longer/more specific first
+ABBREVIATIONS: tuple[tuple[str, str], ...] = (
+    (r"\blfd\.\s*Nr\.", "laufende Nummer"),
+    (r"\bz\.\s*B\.", "zum Beispiel"),
+    (r"\bzB\b", "zum Beispiel"),
+    (r"\bd\.\s*h\.", "das heißt"),
+    (r"\bu\.\s*a\.", "unter anderem"),
+    (r"\bu\.\s*U\.", "unter Umständen"),
+    (r"\bo\.\s*Ä\.", "oder Ähnliches"),
+    (r"\bi\.\s*d\.\s*R\.", "in der Regel"),
+    (r"\bbzw\.", "beziehungsweise"),
+    (r"\betc\.", "et cetera"),
+    (r"\busw\.", "und so weiter"),
+    (r"\bca\.", "circa"),
+    (r"\bggf\.", "gegebenenfalls"),
+    (r"\bevtl\.", "eventuell"),
+    (r"\binkl\.", "inklusive"),
+    (r"\bexkl\.", "exklusive"),
+    (r"\bzzgl\.", "zuzüglich"),
+    (r"\bvgl\.", "vergleiche"),
+    (r"\bbspw\.", "beispielsweise"),
+    (r"\bggü\.", "gegenüber"),
+    (r"\bmind\.", "mindestens"),
+    (r"\bmax\.", "maximal"),
+    (r"\bDr\.", "Doktor"),
+    (r"\bProf\.", "Professor"),
+    (r"\bAbb\.", "Abbildung"),
+    (r"\bAbs\.", "Absatz"),
+    (r"\bKap\.", "Kapitel"),
+    (r"\bNr\.", "Nummer"),
+    (r"\bStr\.", "Straße"),
+    (r"\bgeb\.", "geboren"),
+    (r"\bTsd\.", "Tausend"),
+    (r"\bMio\.", "Millionen"),
+    (r"\bMrd\.", "Milliarden"),
+)
+
+# (unit regex, singular, plural, gender of the singular: "m"/"f"/"n")
+# Only applied directly after a number. Longer/more specific patterns first.
+UNITS: tuple[tuple[str, str, str, str], ...] = (
+    (r"°C", "Grad", "Grad", "n"),
+    (r"°F", "Grad Fahrenheit", "Grad Fahrenheit", "n"),
+    (r"°", "Grad", "Grad", "n"),
+    (r"%", "Prozent", "Prozent", "n"),
+    (r"‰", "Promille", "Promille", "n"),
+    (r"€", "Euro", "Euro", "m"),
+    (r"EUR", "Euro", "Euro", "m"),
+    (r"\$", "Dollar", "Dollar", "m"),
+    (r"ct", "Cent", "Cent", "m"),
+    (r"km/h", "Kilometer pro Stunde", "Kilometer pro Stunde", "m"),
+    (r"kmh", "Kilometer pro Stunde", "Kilometer pro Stunde", "m"),
+    (r"m/s", "Meter pro Sekunde", "Meter pro Sekunde", "m"),
+    (r"Mbit/s", "Megabit pro Sekunde", "Megabit pro Sekunde", "n"),
+    (r"Gbit/s", "Gigabit pro Sekunde", "Gigabit pro Sekunde", "n"),
+    (r"kWh", "Kilowattstunde", "Kilowattstunden", "f"),
+    (r"MWh", "Megawattstunde", "Megawattstunden", "f"),
+    (r"Wh", "Wattstunde", "Wattstunden", "f"),
+    (r"kWp", "Kilowatt Peak", "Kilowatt Peak", "n"),
+    (r"kW", "Kilowatt", "Kilowatt", "n"),
+    (r"MW", "Megawatt", "Megawatt", "n"),
+    (r"W", "Watt", "Watt", "n"),
+    (r"mAh", "Milliamperestunde", "Milliamperestunden", "f"),
+    (r"mA", "Milliampere", "Milliampere", "n"),
+    (r"A", "Ampere", "Ampere", "n"),
+    (r"kV", "Kilovolt", "Kilovolt", "n"),
+    (r"V", "Volt", "Volt", "n"),
+    (r"GHz", "Gigahertz", "Gigahertz", "n"),
+    (r"MHz", "Megahertz", "Megahertz", "n"),
+    (r"kHz", "Kilohertz", "Kilohertz", "n"),
+    (r"Hz", "Hertz", "Hertz", "n"),
+    (r"hPa", "Hektopascal", "Hektopascal", "n"),
+    (r"mbar", "Millibar", "Millibar", "n"),
+    (r"bar", "Bar", "Bar", "n"),
+    (r"ppm", "ppm", "ppm", "n"),
+    (r"µg/m³", "Mikrogramm pro Kubikmeter", "Mikrogramm pro Kubikmeter", "n"),
+    (r"dB", "Dezibel", "Dezibel", "n"),
+    (r"lx", "Lux", "Lux", "n"),
+    (r"TB", "Terabyte", "Terabyte", "n"),
+    (r"GB", "Gigabyte", "Gigabyte", "n"),
+    (r"MB", "Megabyte", "Megabyte", "n"),
+    (r"kB", "Kilobyte", "Kilobyte", "n"),
+    (r"km²", "Quadratkilometer", "Quadratkilometer", "m"),
+    (r"m²", "Quadratmeter", "Quadratmeter", "m"),
+    (r"qm", "Quadratmeter", "Quadratmeter", "m"),
+    (r"m³", "Kubikmeter", "Kubikmeter", "m"),
+    (r"km", "Kilometer", "Kilometer", "m"),
+    (r"cm", "Zentimeter", "Zentimeter", "m"),
+    (r"mm", "Millimeter", "Millimeter", "m"),
+    (r"m", "Meter", "Meter", "m"),
+    (r"ml", "Milliliter", "Milliliter", "m"),
+    (r"l", "Liter", "Liter", "m"),
+    (r"kg", "Kilogramm", "Kilogramm", "n"),
+    (r"mg", "Milligramm", "Milligramm", "n"),
+    (r"g", "Gramm", "Gramm", "n"),
+    (r"Std\.", "Stunde", "Stunden", "f"),
+    (r"h", "Stunde", "Stunden", "f"),
+    (r"Min\.", "Minute", "Minuten", "f"),
+    (r"min", "Minute", "Minuten", "f"),
+    (r"Sek\.", "Sekunde", "Sekunden", "f"),
+    (r"ms", "Millisekunde", "Millisekunden", "f"),
+    (r"s", "Sekunde", "Sekunden", "f"),
+    (r"Stk\.", "Stück", "Stück", "n"),
+)
+
+MONTHS: tuple[str, ...] = (
+    "Januar",
+    "Februar",
+    "März",
+    "April",
+    "Mai",
+    "Juni",
+    "Juli",
+    "August",
+    "September",
+    "Oktober",
+    "November",
+    "Dezember",
+)
+
+# Words after which a following ordinal takes the "-ten" ending (dative/accusative)
+ORDINAL_N_CONTEXT: frozenset[str] = frozenset(
+    {
+        "am",
+        "im",
+        "vom",
+        "zum",
+        "beim",
+        "dem",
+        "den",
+        "des",
+        "zur",
+        "einem",
+        "einen",
+        "ab",
+        "bis",
+        "seit",
+        "dieses",
+        "diesem",
+        "diesen",
+        "nächsten",
+        "letzten",
+    }
+)
+# Words after which a following ordinal takes the "-te" ending (nominative with article)
+ORDINAL_E_CONTEXT: frozenset[str] = frozenset({"der", "die", "das"})
+
+# Feminine noun endings, for "1" -> "eine" before a noun
+FEMININE_SUFFIXES: tuple[str, ...] = ("e", "ung", "heit", "keit", "schaft", "ion", "tät", "ik", "ur", "ei")
